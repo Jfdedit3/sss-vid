@@ -1,7 +1,6 @@
 package com.jfdedit3.sssvid
 
 import android.content.Intent
-import android.net.Uri
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -36,9 +35,9 @@ class GalleryAdapter(
 
             binding.root.setOnClickListener {
                 val context = binding.root.context
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(item.contentUri), "video/*")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val intent = Intent(context, VideoPlayerActivity::class.java).apply {
+                    putExtra(VideoPlayerActivity.EXTRA_VIDEO_URI, item.contentUri)
+                    putExtra(VideoPlayerActivity.EXTRA_VIDEO_TITLE, item.displayName)
                 }
                 context.startActivity(intent)
             }
