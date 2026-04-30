@@ -20,6 +20,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SssVid">
         <activity
+            android:name=".VideoPlayerActivity"
+            android:exported="false"
+            android:screenOrientation="sensor" />
+        <activity
             android:name=".GalleryActivity"
             android:exported="false" />
         <activity
