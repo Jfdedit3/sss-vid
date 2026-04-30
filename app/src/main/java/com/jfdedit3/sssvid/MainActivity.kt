@@ -78,7 +78,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.galleryButton.setOnClickListener {
-            startActivity(Intent(this, GalleryActivity::class.java))
+            if (needsGalleryReadPermission()) {
+                requestGalleryPermissions()
+                Toast.makeText(this, "Autorisation lecture requise pour la galerie", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent(this, GalleryActivity::class.java))
+            }
         }
     }
 
@@ -89,6 +94,10 @@ class MainActivity : AppCompatActivity() {
             permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
 
+        if (needsGalleryReadPermission()) {
+            permissionsToRequest.addAll(galleryReadPermissions())
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -97,7 +106,32 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (permissionsToRequest.isNotEmpty()) {
-            permissionLauncher.launch(permissionsToRequest.toTypedArray())
+            permissionLauncher.launch(permissionsToRequest.distinct().toTypedArray())
+        }
+    }
+
+    private fun requestGalleryPermissions() {
+        val permissionsToRequest = galleryReadPermissions().toMutableList()
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionLauncher.launch(permissionsToRequest.distinct().toTypedArray())
+        }
+    }
+
+    private fun galleryReadPermissions(): List<String> {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(Manifest.permission.READ_MEDIA_VIDEO)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> emptyList()
+        }
+    }
+
+    private fun needsGalleryReadPermission(): Boolean {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+            else -> false
         }
     }
 
