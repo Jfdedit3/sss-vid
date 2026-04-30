@@ -298,7 +298,10 @@ class MainActivity : AppCompatActivity() {
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
-                setDestinationInExternalPublicDir(DOWNLOADS_SUBDIRECTORY, finalFileName)
+                setDestinationInExternalPublicDir(
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "$APP_FOLDER_NAME/$finalFileName"
+                )
             }
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -461,7 +464,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val HOME_URL = "https://ssstwitter.com/"
         private const val APP_FOLDER_NAME = "sss-vid"
-        private const val DOWNLOADS_SUBDIRECTORY = "Download/$APP_FOLDER_NAME"
 
         private fun downloadsRelativePath(): String {
             return "${Environment.DIRECTORY_DOWNLOADS}/$APP_FOLDER_NAME"
