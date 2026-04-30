@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -63,9 +64,21 @@ class MainActivity : AppCompatActivity() {
         requestStartupPermissions()
         ensureLegacyDownloadDirectoryExists()
         setupWebView()
+        setupBottomBar()
 
         if (savedInstanceState == null) {
             binding.webView.loadUrl(HOME_URL)
+        }
+    }
+
+    private fun setupBottomBar() {
+        binding.siteButton.setOnClickListener {
+            Toast.makeText(this, "Site web SSS: $HOME_URL", Toast.LENGTH_LONG).show()
+            binding.webView.loadUrl(HOME_URL)
+        }
+
+        binding.galleryButton.setOnClickListener {
+            startActivity(Intent(this, GalleryActivity::class.java))
         }
     }
 
