@@ -38,15 +38,19 @@ class MainActivity : AppCompatActivity() {
     private var pendingDownload: DownloadData? = null
     private var pendingBlobDownload: BlobDownloadData? = null
 
-    private val storagePermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val storageGranted = !needsLegacyStoragePermission() ||
+            result[Manifest.permission.WRITE_EXTERNAL_STORAGE] == true
+
+        if (storageGranted) {
             pendingDownload?.let { startHttpDownload(it) }
             pendingBlobDownload?.let { downloadBlobUrl(it.url, it.fileName, it.mimeType) }
-        } else {
+        } else if (pendingDownload != null || pendingBlobDownload != null) {
             Toast.makeText(this, "Permission de téléchargement refusée", Toast.LENGTH_LONG).show()
         }
+
         pendingDownload = null
         pendingBlobDownload = null
     }
@@ -56,10 +60,31 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        requestStartupPermissions()
+        ensureLegacyDownloadDirectoryExists()
         setupWebView()
 
         if (savedInstanceState == null) {
             binding.webView.loadUrl(HOME_URL)
+        }
+    }
+
+    private fun requestStartupPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (needsLegacyStoragePermission()) {
+            permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }
 
@@ -125,7 +150,7 @@ class MainActivity : AppCompatActivity() {
             if (url.startsWith("blob:", ignoreCase = true)) {
                 if (needsLegacyStoragePermission()) {
                     pendingBlobDownload = BlobDownloadData(url, fileName, detectedMimeType)
-                    requestLegacyStoragePermission()
+                    requestDownloadPermissionsIfNeeded()
                 } else {
                     downloadBlobUrl(url, fileName, detectedMimeType)
                 }
@@ -136,11 +161,42 @@ class MainActivity : AppCompatActivity() {
 
             if (needsLegacyStoragePermission()) {
                 pendingDownload = data
-                requestLegacyStoragePermission()
+                requestDownloadPermissionsIfNeeded()
             } else {
                 startHttpDownload(data)
             }
         })
+    }
+
+    private fun requestDownloadPermissionsIfNeeded() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (needsLegacyStoragePermission()) {
+            permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    private fun ensureLegacyDownloadDirectoryExists() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val appFolder = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                APP_FOLDER_NAME
+            )
+            if (!appFolder.exists()) {
+                appFolder.mkdirs()
+            }
+        }
     }
 
     private fun injectBlobDownloadHelper() {
@@ -225,10 +281,6 @@ class MainActivity : AppCompatActivity() {
             ) != PackageManager.PERMISSION_GRANTED
     }
 
-    private fun requestLegacyStoragePermission() {
-        storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-    }
-
     private fun startHttpDownload(data: DownloadData) {
         try {
             val finalFileName = ensureFileNameHasCorrectExtension(data.fileName, data.mimeType)
@@ -246,7 +298,7 @@ class MainActivity : AppCompatActivity() {
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, finalFileName)
+                setDestinationInExternalPublicDir(DOWNLOADS_SUBDIRECTORY, finalFileName)
             }
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -262,11 +314,12 @@ class MainActivity : AppCompatActivity() {
             val normalizedMimeType = normalizeMimeType(mimeType)
             val finalFileName = ensureFileNameHasCorrectExtension(fileName, normalizedMimeType)
             val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, finalFileName)
                     put(MediaStore.Downloads.MIME_TYPE, normalizedMimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    put(MediaStore.Downloads.RELATIVE_PATH, DOWNLOADS_RELATIVE_PATH)
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
 
@@ -281,9 +334,12 @@ class MainActivity : AppCompatActivity() {
                 values.put(MediaStore.Downloads.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
             } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!downloadsDir.exists()) downloadsDir.mkdirs()
-                val file = File(downloadsDir, finalFileName)
+                val appFolder = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    APP_FOLDER_NAME
+                )
+                if (!appFolder.exists()) appFolder.mkdirs()
+                val file = File(appFolder, finalFileName)
                 FileOutputStream(file).use { it.write(bytes) }
             }
 
@@ -404,6 +460,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME_URL = "https://ssstwitter.com/"
+        private const val APP_FOLDER_NAME = "sss-vid"
+        private const val DOWNLOADS_SUBDIRECTORY = "Download/$APP_FOLDER_NAME"
+        private const val DOWNLOADS_RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/$APP_FOLDER_NAME"
 
         private val AD_HOSTS = setOf(
             "doubleclick.net",
