@@ -319,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, finalFileName)
                     put(MediaStore.Downloads.MIME_TYPE, normalizedMimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, DOWNLOADS_RELATIVE_PATH)
+                    put(MediaStore.Downloads.RELATIVE_PATH, downloadsRelativePath())
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
 
@@ -462,7 +462,10 @@ class MainActivity : AppCompatActivity() {
         private const val HOME_URL = "https://ssstwitter.com/"
         private const val APP_FOLDER_NAME = "sss-vid"
         private const val DOWNLOADS_SUBDIRECTORY = "Download/$APP_FOLDER_NAME"
-        private const val DOWNLOADS_RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/$APP_FOLDER_NAME"
+
+        private fun downloadsRelativePath(): String {
+            return "${Environment.DIRECTORY_DOWNLOADS}/$APP_FOLDER_NAME"
+        }
 
         private val AD_HOSTS = setOf(
             "doubleclick.net",
