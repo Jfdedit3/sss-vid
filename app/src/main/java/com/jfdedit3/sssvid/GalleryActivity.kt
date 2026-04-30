@@ -36,32 +36,61 @@ class GalleryActivity : AppCompatActivity() {
     }
 
     private fun loadGalleryItems(): List<GalleryItem> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            loadFromMediaStore()
-        } else {
-            loadFromLegacyFolder()
-        }
+        val realFolderItems = loadFromRealDownloadsFolder()
+        if (realFolderItems.isNotEmpty()) return realFolderItems
+
+        val mediaStoreItems = loadFromMediaStoreFallback()
+        if (mediaStoreItems.isNotEmpty()) return mediaStoreItems
+
+        return emptyList()
     }
 
-    private fun loadFromMediaStore(): List<GalleryItem> {
-        val items = mutableListOf<GalleryItem>()
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(
-            MediaStore.Downloads._ID,
-            MediaStore.Downloads.DISPLAY_NAME,
-            MediaStore.Downloads.SIZE,
-            MediaStore.Downloads.RELATIVE_PATH,
-            MediaStore.Downloads.MIME_TYPE
+    private fun loadFromRealDownloadsFolder(): List<GalleryItem> {
+        val folder = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "sss-vid"
         )
-        val selection = "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?"
+
+        if (!folder.exists() || !folder.isDirectory) return emptyList()
+
+        return folder.listFiles()
+            ?.filter { it.isFile }
+            ?.sortedByDescending { it.lastModified() }
+            ?.map {
+                GalleryItem(
+                    displayName = it.name,
+                    infoText = buildInfoText(it.length(), guessMimeTypeFromName(it.name)),
+                    contentUri = Uri.fromFile(it).toString()
+                )
+            }
+            ?: emptyList()
+    }
+
+    private fun loadFromMediaStoreFallback(): List<GalleryItem> {
+        val items = mutableListOf<GalleryItem>()
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Files.getContentUri("external")
+        }
+
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.SIZE,
+            MediaStore.Files.FileColumns.RELATIVE_PATH,
+            MediaStore.Files.FileColumns.MIME_TYPE
+        )
+
+        val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
         val selectionArgs = arrayOf("${Environment.DIRECTORY_DOWNLOADS}/sss-vid%")
-        val sortOrder = "${MediaStore.Downloads._ID} DESC"
+        val sortOrder = "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
 
         contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
-            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.SIZE)
-            val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.MIME_TYPE)
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+            val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -69,6 +98,7 @@ class GalleryActivity : AppCompatActivity() {
                 val size = cursor.getLong(sizeColumn)
                 val mimeType = cursor.getString(mimeColumn).orEmpty()
                 val uri = Uri.withAppendedPath(collection, id.toString())
+
                 items.add(
                     GalleryItem(
                         displayName = name,
@@ -80,25 +110,6 @@ class GalleryActivity : AppCompatActivity() {
         }
 
         return items
-    }
-
-    private fun loadFromLegacyFolder(): List<GalleryItem> {
-        val folder = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "sss-vid"
-        )
-        if (!folder.exists() || !folder.isDirectory) return emptyList()
-
-        return folder.listFiles()
-            ?.sortedByDescending { it.lastModified() }
-            ?.map {
-                GalleryItem(
-                    displayName = it.name,
-                    infoText = buildInfoText(it.length(), guessMimeTypeFromName(it.name)),
-                    contentUri = Uri.fromFile(it).toString()
-                )
-            }
-            ?: emptyList()
     }
 
     private fun buildInfoText(size: Long, mimeType: String): String {
