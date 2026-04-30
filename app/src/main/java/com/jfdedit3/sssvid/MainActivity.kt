@@ -14,6 +14,7 @@ import android.util.Base64
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.JavascriptInterface
+import android.webkit.MimeTypeMap
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -117,20 +118,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            val safeMimeType = mimeType.ifBlank { guessMimeTypeFromUrl(url) }
-            val fileName = URLUtil.guessFileName(url, contentDisposition, safeMimeType)
+            val detectedMimeType = normalizeMimeType(mimeType.ifBlank { guessMimeTypeFromUrl(url) })
+            val rawFileName = URLUtil.guessFileName(url, contentDisposition, detectedMimeType)
+            val fileName = ensureFileNameHasCorrectExtension(rawFileName, detectedMimeType)
 
             if (url.startsWith("blob:", ignoreCase = true)) {
                 if (needsLegacyStoragePermission()) {
-                    pendingBlobDownload = BlobDownloadData(url, fileName, safeMimeType)
+                    pendingBlobDownload = BlobDownloadData(url, fileName, detectedMimeType)
                     requestLegacyStoragePermission()
                 } else {
-                    downloadBlobUrl(url, fileName, safeMimeType)
+                    downloadBlobUrl(url, fileName, detectedMimeType)
                 }
                 return@DownloadListener
             }
 
-            val data = DownloadData(url, userAgent, contentDisposition, safeMimeType, fileName)
+            val data = DownloadData(url, userAgent, contentDisposition, detectedMimeType, fileName)
 
             if (needsLegacyStoragePermission()) {
                 pendingDownload = data
@@ -229,6 +231,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpDownload(data: DownloadData) {
         try {
+            val finalFileName = ensureFileNameHasCorrectExtension(data.fileName, data.mimeType)
             val request = DownloadManager.Request(Uri.parse(data.url)).apply {
                 setMimeType(data.mimeType)
                 addRequestHeader("User-Agent", data.userAgent)
@@ -239,16 +242,16 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 setDescription("Téléchargement en cours...")
-                setTitle(data.fileName)
+                setTitle(finalFileName)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, data.fileName)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, finalFileName)
             }
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
-            Toast.makeText(this, "Téléchargement lancé", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Téléchargement lancé: $finalFileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Erreur téléchargement: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -256,11 +259,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveBase64File(base64Data: String, fileName: String, mimeType: String) {
         try {
+            val normalizedMimeType = normalizeMimeType(mimeType)
+            val finalFileName = ensureFileNameHasCorrectExtension(fileName, normalizedMimeType)
             val bytes = Base64.decode(base64Data, Base64.DEFAULT)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(MediaStore.Downloads.DISPLAY_NAME, finalFileName)
+                    put(MediaStore.Downloads.MIME_TYPE, normalizedMimeType)
                     put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
@@ -278,13 +283,57 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 if (!downloadsDir.exists()) downloadsDir.mkdirs()
-                val file = File(downloadsDir, fileName)
+                val file = File(downloadsDir, finalFileName)
                 FileOutputStream(file).use { it.write(bytes) }
             }
 
-            Toast.makeText(this, "Téléchargement terminé: $fileName", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Téléchargement terminé: $finalFileName", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Erreur sauvegarde: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun normalizeMimeType(mimeType: String?): String {
+        val value = mimeType.orEmpty().trim().lowercase(Locale.ROOT)
+        return when {
+            value.isBlank() -> "video/mp4"
+            value == "application/octet-stream" -> "video/mp4"
+            value == "binary/octet-stream" -> "video/mp4"
+            value.contains("mp4") -> "video/mp4"
+            value.contains("webm") -> "video/webm"
+            value.contains("mpeg") || value.contains("mp3") -> "audio/mpeg"
+            value.contains("jpeg") || value.contains("jpg") -> "image/jpeg"
+            value.contains("png") -> "image/png"
+            else -> value
+        }
+    }
+
+    private fun ensureFileNameHasCorrectExtension(fileName: String, mimeType: String): String {
+        val cleaned = fileName.trim().ifBlank { "download_${System.currentTimeMillis()}" }
+        val extension = extensionFromMimeType(mimeType)
+
+        if (extension.isBlank()) return cleaned
+
+        val lowerName = cleaned.lowercase(Locale.ROOT)
+        if (lowerName.endsWith(".$extension")) return cleaned
+
+        if (lowerName.endsWith(".bin") || '.' !in cleaned.substringAfterLast('/')) {
+            val base = cleaned.substringBeforeLast('.', cleaned)
+            return "$base.$extension"
+        }
+
+        return cleaned
+    }
+
+    private fun extensionFromMimeType(mimeType: String): String {
+        val normalized = normalizeMimeType(mimeType)
+        return when (normalized) {
+            "video/mp4" -> "mp4"
+            "video/webm" -> "webm"
+            "audio/mpeg" -> "mp3"
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            else -> MimeTypeMap.getSingleton().getExtensionFromMimeType(normalized).orEmpty()
         }
     }
 
@@ -296,7 +345,7 @@ class MainActivity : AppCompatActivity() {
             lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
             lower.endsWith(".png") -> "image/png"
             lower.endsWith(".webm") -> "video/webm"
-            else -> "application/octet-stream"
+            else -> "video/mp4"
         }
     }
 
