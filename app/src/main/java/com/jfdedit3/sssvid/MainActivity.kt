@@ -12,6 +12,8 @@ import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -20,6 +22,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.jfdedit3.sssvid.databinding.ActivityMainBinding
+import java.io.ByteArrayInputStream
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -71,6 +75,18 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url?.toString().orEmpty()
+                return if (shouldBlockRequest(url)) {
+                    emptyResponse()
+                } else {
+                    super.shouldInterceptRequest(view, request)
+                }
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 binding.progressBar.hide()
@@ -99,6 +115,27 @@ class MainActivity : AppCompatActivity() {
                 startDownload(data)
             }
         })
+    }
+
+    private fun shouldBlockRequest(url: String): Boolean {
+        if (url.isBlank()) return false
+
+        val lowerUrl = url.lowercase(Locale.ROOT)
+        val host = runCatching { Uri.parse(url).host.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
+
+        if (AD_HOSTS.any { host == it || host.endsWith(".$it") }) {
+            return true
+        }
+
+        return AD_URL_KEYWORDS.any { lowerUrl.contains(it) }
+    }
+
+    private fun emptyResponse(): WebResourceResponse {
+        return WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            ByteArrayInputStream(ByteArray(0))
+        )
     }
 
     private fun needsLegacyStoragePermission(): Boolean {
@@ -180,5 +217,45 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME_URL = "https://ssstwitter.com/"
+
+        private val AD_HOSTS = setOf(
+            "doubleclick.net",
+            "googlesyndication.com",
+            "googleadservices.com",
+            "adservice.google.com",
+            "adservice.google.fr",
+            "google-analytics.com",
+            "googletagmanager.com",
+            "googletagservices.com",
+            "gstaticadssl.l.google.com",
+            "facebook.net",
+            "connect.facebook.net",
+            "ads-twitter.com",
+            "ads.yahoo.com",
+            "amazon-adsystem.com",
+            "branch.io",
+            "appsflyer.com",
+            "adjust.com",
+            "criteo.com",
+            "criteo.net",
+            "taboola.com",
+            "outbrain.com"
+        )
+
+        private val AD_URL_KEYWORDS = listOf(
+            "/ads/",
+            "/ad/",
+            "doubleclick",
+            "googlesyndication",
+            "googleads",
+            "adservice",
+            "analytics",
+            "tracking",
+            "tracker",
+            "pixel",
+            "banner",
+            "popunder",
+            "popup"
+        )
     }
 }
