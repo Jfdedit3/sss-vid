@@ -2,6 +2,8 @@ package com.jfdedit3.sssvid
 
 import android.Manifest
 import android.app.DownloadManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -77,12 +79,73 @@ class MainActivity : AppCompatActivity() {
             binding.webView.loadUrl(HOME_URL)
         }
 
+        binding.pasteButton.setOnClickListener {
+            pasteClipboardToWebsite()
+        }
+
         binding.galleryButton.setOnClickListener {
             if (needsGalleryReadPermission()) {
                 requestGalleryPermissions()
                 Toast.makeText(this, "Autorisation lecture requise pour la galerie", Toast.LENGTH_SHORT).show()
             } else {
                 startActivity(Intent(this, GalleryActivity::class.java))
+            }
+        }
+    }
+
+    private fun pasteClipboardToWebsite() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        if (!clipboard.hasPrimaryClip()) {
+            Toast.makeText(this, "Presse-papiers vide", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val clipData = clipboard.primaryClip
+        val itemText = clipData?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty().trim()
+        if (itemText.isBlank()) {
+            Toast.makeText(this, "Aucun texte à coller", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val escapedText = jsEscape(itemText)
+        val js = """
+            (function() {
+                var value = '$escapedText';
+                var selectors = [
+                    'input[type="text"]',
+                    'input[type="search"]',
+                    'input[type="url"]',
+                    'textarea',
+                    'input:not([type])'
+                ];
+
+                var target = null;
+                for (var i = 0; i < selectors.length; i++) {
+                    target = document.querySelector(selectors[i]);
+                    if (target) break;
+                }
+
+                if (!target) {
+                    var allInputs = document.querySelectorAll('input, textarea');
+                    if (allInputs.length > 0) target = allInputs[0];
+                }
+
+                if (target) {
+                    target.focus();
+                    target.value = value;
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                    return 'ok';
+                }
+                return 'no_input';
+            })();
+        """.trimIndent()
+
+        binding.webView.evaluateJavascript(js) { result ->
+            if (result == "\"ok\"") {
+                Toast.makeText(this, "Lien collé depuis le presse-papiers", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Impossible de trouver un champ à remplir", Toast.LENGTH_SHORT).show()
             }
         }
     }
